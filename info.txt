@@ -1,0 +1,11 @@
+1) What is meant by uptime and downtime ?
+a) So it's assumed that, restraunts are always open in the working hours, so by this uptime and downtime hours are simply meant
+to indicate the system responsivesness responsible for makring active and inactive.
+
+2) What will be the extrapolation strategy ?
+a) According to the problem, it is fare to that the system is only active as long as been it's polled active, anytime when
+there is no data available it's fair to assume that there's been some issue with the system, as a result, the data is not
+there, thus, the system is inactive, or, the system is down.
+
+3) How will the active pings will be injested ?
+a)

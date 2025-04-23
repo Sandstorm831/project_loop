@@ -1,7 +1,7 @@
 import sqlite3
 import os
 import polars as pl
-from sqlite3.dbapi2 import Connection, Cursor
+from sqlite3.dbapi2 import Cursor
 
 filePath = os.path.abspath(__file__)
 db_loc = filePath.split("project_loop")[0] + "project_loop/ingestor.db"
@@ -31,7 +31,7 @@ def defineTables(cursor: Cursor):
     print("created_hours")
     return
 
-def ingest_data(cursor: Cursor, conn: Connection):
+def ingest_data():
     raw_path = os.path.abspath(__file__)
     timezones_path = raw_path.split("project_loop")[0] + "project_loop/data/timezones.csv"
     ping_path = raw_path.split("project_loop")[0] + "project_loop/data/store_status.csv"
@@ -67,6 +67,13 @@ def ingest_data(cursor: Cursor, conn: Connection):
         pl.col('timestamp_utc').alias('recorded_at'),
     )
     df_hours = df_hours.rename({"dayOfWeek": "week_day", "start_time_local": "start_time", "end_time_local": "end_time"})
+
+    # Latest ping
+    # latest_ping = df_ping.select(
+    #     pl.col('recorded_at').max()
+    # ).item()
+    # print(latest_ping)
+
     df_timezones.write_database(
         table_name="store_timezones",
         connection=f'sqlite:///{db_loc}',
@@ -92,9 +99,10 @@ try:
     defineTables(cursor)
 
     # Ingest data from csv files
-    ingest_data(cursor, conn)
+    ingest_data()
 
     cursor.close()
     conn.close()
+
 except sqlite3.OperationalError as e :
     print("Failed to open database: ", e)
