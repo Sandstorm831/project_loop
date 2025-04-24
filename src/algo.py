@@ -4,10 +4,12 @@ import sqlite3
 import os
 from sqlite3.dbapi2 import Connection, Cursor
 import math
+import time
+import polars as pl
 
 filePath = os.path.abspath(__file__)
 db_loc = filePath.split("project_loop")[0] + "project_loop/ingestor.db"
-
+result_loc = filePath.split("project_loop")[0] + "project_loop/report.csv"
 
 internal_curr_datetime = "2024-10-14 23:55:18.727055 UTC"
 internal_curr_datetime_obj_utc = datetime.strptime(
@@ -15,9 +17,12 @@ internal_curr_datetime_obj_utc = datetime.strptime(
 
 
 def store_hour_converter(temp_res):
-    x = [() for i in range(7)]
+    x = [["00:01:00", "23:59:59"] for i in range(7)]
+    if len(temp_res) == 0:
+        return x
     for obj in temp_res:
-        x[obj[2]] = (obj[3], obj[4])
+
+        x[obj[2]] = [obj[3], obj[4]]
     return x
 
 
@@ -65,7 +70,6 @@ def calc_uptime_downtime(week_u, day_u, hour_u, working_hours, store_id, timezon
     hour_work = 0.0
     for i in range(len(working_hours)):
         temp = timeDiff(working_hours[i][0], working_hours[i][1])
-        print(temp)
         week_work[0] += temp[0]
         week_work[1] += temp[1]
 
@@ -100,7 +104,7 @@ def calc_uptime_downtime(week_u, day_u, hour_u, working_hours, store_id, timezon
     a_hour_ago_local_str = utc_to_localtimestamp(timezone, a_hour_ago_str)
     if a_hour_ago_local_str >= today_open:
         if today_local_str <= today_close:
-            hour_work = 3600
+            hour_work = 60
         elif today_local_str > today_close and today_close >= a_hour_ago_local_str:
             temp = datetimeDiff(today_close, a_hour_ago_local_str)
             hour_work += temp[1]
@@ -111,7 +115,7 @@ def calc_uptime_downtime(week_u, day_u, hour_u, working_hours, store_id, timezon
         elif today_local_str > today_close:
             temp = datetimeDiff(today_close, today_open)
             hour_work += temp[1]
-    
+
     week_seconds = week_work[0]*3600 + week_work[1]*60
     day_seconds = day_work[0]*3600 + day_work[1]*60
     hour_seconds = hour_work*60
@@ -122,21 +126,36 @@ def calc_uptime_downtime(week_u, day_u, hour_u, working_hours, store_id, timezon
     day_downtime_hours = (day_seconds - day_u) // 3600
     hour_downtime_minutes = (hour_seconds - hour_u) // 60
     return [store_id, hour_uptime_minutes, day_uptime_hours, week_uptime_hours, hour_downtime_minutes, day_downtime_hours, week_downtime_hours]
-    
+
 
 def start_queries(conn: Connection, cursor: Cursor):
+    schema = {
+        "store_id": pl.String,
+        "uptime_last_hour": pl.Float32,
+        "uptime_last_day": pl.Float32,
+        "update_last_week": pl.Float32,
+        "downtime_last_hour": pl.Float32,
+        "downtime_last_day": pl.Float32,
+        "downtime_last_week": pl.Float32,
+    }
+    result_df = pl.DataFrame(schema=schema)
     total_store_id_query = 'SELECT COUNT(*) FROM store_timezones'
     store_ids_per_page = 200
     cursor.execute(total_store_id_query)
     total_store_ids = cursor.fetchone()[0]
     total_pages = math.ceil(total_store_ids / store_ids_per_page)
+    poor_time_start = time.time()
     for page in range(total_pages):
         store_id_time_zones_query = f'''SELECT * FROM store_timezones
         ORDER BY store_id
         LIMIT {store_ids_per_page} OFFSET {page * store_ids_per_page}'''
         cursor.execute(store_id_time_zones_query)
         store_id_time_zones = cursor.fetchall()
+        index_iterator = 0
+        start_time_ = time.time()
+        page_result_store = []
         for store_id, curr_zone in store_id_time_zones:
+            index_iterator += 1
             working_hour_query = f'''SELECT * FROM store_hours
             WHERE store_id = ?'''
             cursor.execute(working_hour_query, (store_id,))
@@ -223,9 +242,16 @@ def start_queries(conn: Connection, cursor: Cursor):
 
             final_output = calc_uptime_downtime(
                 a_week_upticks, a_day_upticks, a_hour_upticks, working_hours, store_id, curr_zone, datetimeToDay(a_local_day_str))
-            print(final_output)
-            break
-        print(f'{page} / {total_pages}')
+            page_result_store.append(final_output)
+            if index_iterator % 40 == 0:
+                print(f'sample {index_iterator} of page {page+1} processed')
+        end_time_ = time.time()
+        print(f'{page+1} / {total_pages} completed, time taken for processing {page+1} page : {end_time_ - start_time_}')
+        temp_df = pl.DataFrame(page_result_store, schema=schema, orient='row')
+        result_df = result_df.vstack(temp_df)
+    poor_time_end = time.time()
+    print(f'Total time taken : {poor_time_end - poor_time_start}')
+    result_df.write_csv(result_loc)
 
 
 def report_processor():
@@ -240,5 +266,6 @@ def report_processor():
 
     except sqlite3.OperationalError as e:
         print("Failed to open database: ", e)
+
 
 report_processor()
