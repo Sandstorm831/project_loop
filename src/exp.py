@@ -32,7 +32,7 @@ def utc_to_localtimestamp(timezone, datetimestr):
     localtime_str = localtime_obj.strftime("%Y-%m-%d %H:%M:%S.%f")
     return localtime_str
 
-def diffInTimes(local, last):
+def datetimeDiff(local, last):
     format = "%Y-%m-%d %H:%M:%S.%f"
     local_obj = datetime.strptime(local, format)
     last_obj = datetime.strptime(last, format)
@@ -40,6 +40,81 @@ def diffInTimes(local, last):
     hours = time_diff.total_seconds() // 3600
     minutes = (time_diff.total_seconds() % 3600) // 60
     return (hours, minutes)
+
+
+def timeDiff(open, close):
+    format = "%H:%M:%S"
+    close_obj = datetime.strptime(close, format)
+    open_obj = datetime.strptime(open, format)
+    time_diff = close_obj - open_obj
+    hours = time_diff.total_seconds() // 3600
+    minutes = (time_diff.total_seconds() % 3600) // 60
+    return (hours, minutes)
+
+
+def calc_uptime_downtime(week_u, day_u, hour_u, working_hours, store_id, timezone, weekday_day_ago):
+    week_work = [0.0, 0.0]
+    day_work = [0.0, 0.0]
+    hour_work = 0.0
+    for i in range(len(working_hours)):
+        temp = timeDiff(working_hours[i][0], working_hours[i][1])
+        # print(temp)
+        week_work[0] += temp[0]
+        week_work[1] += temp[1]
+
+    a_day_ago_obj = internal_curr_datetime_obj_utc - timedelta(days=1)
+    a_day_ago_str = a_day_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
+    a_day_ago_local_str = utc_to_localtimestamp(timezone, a_day_ago_str)
+    today_local_str = utc_to_localtimestamp(timezone, internal_curr_datetime)
+    weekday_today = (weekday_day_ago + 1) % 7
+    day_ago_open = f'{a_day_ago_local_str.split(" ")[0]} {working_hours[weekday_day_ago][0]}.000000'
+    day_ago_close = f'{a_day_ago_local_str.split(" ")[0]} {working_hours[weekday_day_ago][1]}.000000'
+    today_open = f'{today_local_str.split(" ")[0]} {working_hours[weekday_today][0]}.000000'
+    today_close = f'{today_local_str.split(" ")[0]} {working_hours[weekday_today][1]}.000000'
+    if a_day_ago_local_str <= day_ago_open:
+        temp = datetimeDiff(day_ago_close, day_ago_open)
+        day_work[0] += temp[0]
+        day_work[1] += temp[1]
+    elif a_day_ago_local_str > day_ago_open and a_day_ago_local_str < day_ago_close:
+        temp = datetimeDiff(day_ago_close, a_day_ago_local_str)
+        day_work[0] += temp[0]
+        day_work[1] += temp[1]
+    if today_local_str >= today_close:
+        temp = datetimeDiff(today_close, today_open)
+        day_work[0] += temp[0]
+        day_work[1] += temp[1]
+    elif today_local_str > today_open and today_local_str < today_close:
+        temp = datetimeDiff(today_local_str, today_open)
+        day_work[0] += temp[0]
+        day_work[1] += temp[1]
+
+    a_hour_ago_obj = internal_curr_datetime_obj_utc - timedelta(hours=1)
+    a_hour_ago_str = a_hour_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
+    a_hour_ago_local_str = utc_to_localtimestamp(timezone, a_hour_ago_str)
+    if a_hour_ago_local_str >= today_open:
+        if today_local_str <= today_close:
+            hour_work = 60
+        elif today_local_str > today_close and today_close >= a_hour_ago_local_str:
+            temp = datetimeDiff(today_close, a_hour_ago_local_str)
+            hour_work += temp[1]
+    elif a_hour_ago_local_str < today_open and today_local_str >= today_open:
+        if today_local_str <= today_close:
+            temp = datetimeDiff(a_hour_ago_local_str, today_open)
+            hour_work += temp[1]
+        elif today_local_str > today_close:
+            temp = datetimeDiff(today_close, today_open)
+            hour_work += temp[1]
+    
+    week_seconds = week_work[0]*3600 + week_work[1]*60
+    day_seconds = day_work[0]*3600 + day_work[1]*60
+    hour_seconds = hour_work*60
+    week_uptime_hours = week_u // 3600
+    day_uptime_hours = day_u // 3600
+    hour_uptime_minutes = hour_u // 60
+    week_downtime_hours = (week_seconds - week_u) // 3600
+    day_downtime_hours = (day_seconds - day_u) // 3600
+    hour_downtime_minutes = (hour_seconds - hour_u) // 60
+    return [store_id, hour_uptime_minutes, day_uptime_hours, week_uptime_hours, hour_downtime_minutes, day_downtime_hours, week_downtime_hours]
 
 def tester():
     try:
@@ -86,27 +161,38 @@ def tester():
                 a_hour_upticks = 0
                 a_local_day_str = utc_to_localtimestamp(curr_zone, a_day_str)
                 a_local_hour_str = utc_to_localtimestamp(curr_zone, an_hour_str)
-                a_local_hour_and_half_str = utc_to_localtimestamp(curr_zone, an_hour_and_half_str)
+                a_local_hour_and_half_str = utc_to_localtimestamp(
+                    curr_zone, an_hour_and_half_str)
                 for index in range(len(timestamps_and_days)):
-                    local_timestamp = utc_to_localtimestamp(curr_zone, timestamps_and_days[index][3])
+                    local_timestamp = utc_to_localtimestamp(
+                        curr_zone, timestamps_and_days[index][3])
+
+                    # check if timestamp lies in working hours, if not, continue
+                    local_opening_time = f'{local_timestamp.split(" ")[0]} {working_hours[datetimeToDay(local_timestamp)][0]}.000000'
+                    local_closing_time = f'{local_timestamp.split(" ")[0]} {working_hours[datetimeToDay(local_timestamp)][1]}.000000'
+                    if local_timestamp < local_opening_time or local_timestamp > local_closing_time:
+                        continue
+
                     if last_timestamp == None or last_timestamp.split(" ")[0] != local_timestamp.split(" ")[0]:
                         # as new day is there, adding the last timestamp forward time covered from the closing hour
                         if index > 0 and last_timestamp != None:
-                            temp_stamp = utc_to_localtimestamp(curr_zone, timestamps_and_days[index-1][3])
+                            temp_stamp = utc_to_localtimestamp(
+                                curr_zone, timestamps_and_days[index-1][3])
                             temp_stamp = f'{temp_stamp.split(" ")[0]} {working_hours[datetimeToDay(temp_stamp)][1]}.000000'
-                            (x,y) = diffInTimes(temp_stamp, last_timestamp)
-                            if x>0 or y>=30:
+                            (x, y) = datetimeDiff(temp_stamp, last_timestamp)
+                            if x > 0 or y >= 30:
                                 a_week_upticks += 30*60
                             else:
                                 a_week_upticks += y*60
 
                         last_timestamp = f'{local_timestamp.split(" ")[0]} {working_hours[datetimeToDay(local_timestamp)][0]}.000000'
                         newday = True
-                    (h,m) = diffInTimes(local_timestamp, last_timestamp)
+                    (h, m) = datetimeDiff(local_timestamp, last_timestamp)
                     if local_timestamp >= a_local_hour_str:
                         a_hour_upticks = 60*60
                     elif local_timestamp >= a_local_hour_and_half_str:
-                        a_hour_upticks += (30 - diffInTimes(local_timestamp, a_local_hour_and_half_str)[1])*60
+                        a_hour_upticks += (30 - datetimeDiff(local_timestamp,
+                                        a_local_hour_and_half_str)[1])*60
                     if newday:
                         a_week_upticks += m*60
                         if local_timestamp > a_local_day_str:
@@ -120,16 +206,15 @@ def tester():
                         if local_timestamp > a_local_day_str:
                             a_day_upticks += 3600
                         continue
-                    elif h==0 and m > 30:
+                    elif h == 0 and m > 30:
                         a_week_upticks += m*60
                         if local_timestamp > a_local_day_str:
                             a_day_upticks += m*60
                         continue
 
-
-                print(a_week_upticks)
-                print(a_day_upticks)
-                print(a_hour_upticks)
+                final_output = calc_uptime_downtime(
+                    a_week_upticks, a_day_upticks, a_hour_upticks, working_hours, store_id, curr_zone, datetimeToDay(a_local_day_str))
+                print(final_output)
                 break
             print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
 
