@@ -129,6 +129,7 @@ def calc_uptime_downtime(week_u, day_u, hour_u, working_hours, store_id, timezon
 
 
 def start_queries(conn: Connection, cursor: Cursor):
+    # output CSV format
     schema = {
         "store_id": pl.String,
         "uptime_last_hour": pl.Float32,
@@ -139,6 +140,7 @@ def start_queries(conn: Connection, cursor: Cursor):
         "downtime_last_week": pl.Float32,
     }
     
+    # Date-time objects
     a_week_ago_obj = internal_curr_datetime_obj_utc - \
         timedelta(weeks=1)
     a_day_ago_obj = internal_curr_datetime_obj_utc - timedelta(days=1)
@@ -152,6 +154,7 @@ def start_queries(conn: Connection, cursor: Cursor):
     an_hour_and_half_str = an_hour_and_half_ago_obj.strftime(
         "%Y-%m-%d %H:%M:%S.%f UTC")
     
+    # Fetching total number of store_ids
     result_df = pl.DataFrame(schema=schema)
     total_store_id_query = 'SELECT COUNT(*) FROM store_timezones'
     store_ids_per_page = 2000
@@ -162,6 +165,8 @@ def start_queries(conn: Connection, cursor: Cursor):
     for page in range(total_pages):
         print(f'Processing page {page+1}')
         start_time_ = time.time()
+        
+        # fetching all the store_ids, timezones, relavant pings and working hours
         store_id_time_zones_query = '''SELECT * FROM store_timezones
         ORDER BY store_id
         LIMIT ? OFFSET ?'''
