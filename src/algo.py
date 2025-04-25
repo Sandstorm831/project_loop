@@ -6,6 +6,7 @@ from sqlite3.dbapi2 import Connection, Cursor
 import math
 import time
 import polars as pl
+from src.volatile import processing_status
 
 filePath = os.path.abspath(__file__)
 db_loc = filePath.split("project_loop")[0] + "project_loop/ingestor.db"
@@ -250,8 +251,8 @@ def start_queries(conn: Connection, cursor: Cursor):
         temp_df = pl.DataFrame(page_result_store, schema=schema, orient='row')
         result_df = result_df.vstack(temp_df)
     poor_time_end = time.time()
-    print(f'Total time taken : {poor_time_end - poor_time_start}')
     result_df.write_csv(result_loc)
+    print(f'Processing completed, Total time taken : {poor_time_end - poor_time_start}')
 
 
 def report_processor():
@@ -263,9 +264,8 @@ def report_processor():
 
         cursor.close()
         conn.close()
+        processing_status["status"] = 2
 
-    except sqlite3.OperationalError as e:
-        print("Failed to open database: ", e)
-
-
-report_processor()
+    except Exception as e:
+        processing_status["status"] = 3
+        print("Some error occured", e)
