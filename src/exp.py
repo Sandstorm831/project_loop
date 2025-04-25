@@ -3,9 +3,10 @@ import os
 from sqlite3.dbapi2 import Connection, Cursor
 import math
 import polars as pl
+import time
 filePath = os.path.abspath(__file__)
 db_loc = filePath.split("project_loop")[0] + "project_loop/ingestor.db"
-
+result_loc = filePath.split("project_loop")[0] + "project_loop/report_iter2.csv"
 from datetime import datetime, timedelta
 from dateutil import tz
 
@@ -37,6 +38,7 @@ TheBigSchema = {
     "opening_hour": pl.String,
     "closing_hour": pl.String,
 }
+
 
 def datetimeToDay(datetimeStr):
     if datetimeStr[-1] != 'C':
@@ -140,9 +142,18 @@ def tester():
     try:
         conn = sqlite3.connect(db_loc)
         cursor = conn.cursor()
-
+        schema = {
+            "store_id": pl.String,
+            "uptime_last_hour": pl.Float32,
+            "uptime_last_day": pl.Float32,
+            "update_last_week": pl.Float32,
+            "downtime_last_hour": pl.Float32,
+            "downtime_last_day": pl.Float32,
+            "downtime_last_week": pl.Float32,
+        }
+        result_df = pl.DataFrame(schema=schema)
         total_store_id_query = 'SELECT COUNT(*) FROM store_timezones'
-        store_ids_per_page = 1000
+        store_ids_per_page = 2000
         cursor.execute(total_store_id_query)
         total_store_ids = cursor.fetchone()[0]
         total_pages = math.ceil(total_store_ids / store_ids_per_page)
@@ -156,7 +167,7 @@ def tester():
         a_day_str = a_day_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
         an_hour_str = an_hour_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
         an_hour_and_half_str = an_hour_and_half_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
-        
+        poor_time_start = time.time()
         for page in range(total_pages):
             # store_id_time_zones_query = f'''SELECT * FROM store_timezones
             # ORDER BY store_id
@@ -185,7 +196,7 @@ def tester():
             ORDER BY store_id ASC'''
             page_store_ids.append(a_week_str)
             pings_df = pl.read_database(query=timestamp_since_week_ago_query, connection=conn, execute_options={"parameters": page_store_ids})
-            
+            page_result_store = []
             
             for row in timezone__df.iter_rows():
                 store_id = row[0]
@@ -194,7 +205,12 @@ def tester():
                     pl.col('store_id') ==  store_id
                 ).sort("week_day")
                 working_hours = polars_store_hour_converter(working_hours)
-                break
+                timestamps_and_days = pings_df.filter(
+                    pl.col('store_id') ==  store_id
+                ).sort('recorded_at')
+                timestamps_and_days = [list(rows) for rows in timestamps_and_days.rows()]
+                # print(timestamps_and_days)
+                # break
             # print(pings_df.rows)
             # TheBigDF = pings_df.select(
             #     pl.col('store_id'),
@@ -215,21 +231,21 @@ def tester():
             
             
             ################
-            break
+            # break
             
-            for store_id, curr_zone in store_id_time_zones:
-                working_hour_query = f'''SELECT * FROM store_hours
-                WHERE store_id = ?'''
-                cursor.execute(working_hour_query, (store_id,))
-                temp_res = cursor.fetchall()
-                working_hours = store_hour_converter(temp_res)
+            # for store_id, curr_zone in store_id_time_zones:
+                # working_hour_query = f'''SELECT * FROM store_hours
+                # WHERE store_id = ?'''
+                # cursor.execute(working_hour_query, (store_id,))
+                # temp_res = cursor.fetchall()
+                # working_hours = store_hour_converter(temp_res)
 
-                timestamp_since_week_ago_query = f'''SELECT * FROM store_pings
-                WHERE store_id = ? AND recorded_at >= ? AND is_active = 1
-                '''
-                cursor.execute(timestamp_since_week_ago_query, (store_id, a_week_str))
-                timestamps_and_days = cursor.fetchall()
-                timestamps_and_days.sort(key = lambda x: (x[3], x[0]))
+                # timestamp_since_week_ago_query = f'''SELECT * FROM store_pings
+                # WHERE store_id = ? AND recorded_at >= ? AND is_active = 1
+                # '''
+                # cursor.execute(timestamp_since_week_ago_query, (store_id, a_week_str))
+                # timestamps_and_days = cursor.fetchall()
+                # timestamps_and_days.sort(key = lambda x: (x[3], x[0]))
                 last_timestamp = None
                 newday = True
                 a_week_upticks = 0
@@ -241,7 +257,7 @@ def tester():
                     curr_zone, an_hour_and_half_str)
                 for index in range(len(timestamps_and_days)):
                     local_timestamp = utc_to_localtimestamp(
-                        curr_zone, timestamps_and_days[index][3])
+                        curr_zone, timestamps_and_days[index][1])
 
                     # check if timestamp lies in working hours, if not, continue
                     local_opening_time = f'{local_timestamp.split(" ")[0]} {working_hours[datetimeToDay(local_timestamp)][0]}.000000'
@@ -253,7 +269,7 @@ def tester():
                         # as new day is there, adding the last timestamp forward time covered from the closing hour
                         if index > 0 and last_timestamp != None:
                             temp_stamp = utc_to_localtimestamp(
-                                curr_zone, timestamps_and_days[index-1][3])
+                                curr_zone, timestamps_and_days[index-1][1])
                             temp_stamp = f'{temp_stamp.split(" ")[0]} {working_hours[datetimeToDay(temp_stamp)][1]}.000000'
                             (x, y) = datetimeDiff(temp_stamp, last_timestamp)
                             if x > 0 or y >= 30:
@@ -290,10 +306,15 @@ def tester():
 
                 final_output = calc_uptime_downtime(
                     a_week_upticks, a_day_upticks, a_hour_upticks, working_hours, store_id, curr_zone, datetimeToDay(a_local_day_str))
-                print(final_output)
-                break
+                page_result_store.append(final_output)
+                
+                # break
             print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
-
+            temp_df = pl.DataFrame(page_result_store, schema=schema, orient='row')
+            result_df = result_df.vstack(temp_df)
+        poor_time_end = time.time()
+        result_df.write_csv(result_loc)
+        print(f'Processing completed, Total time taken : {poor_time_end - poor_time_start}')
 
         cursor.close()
         conn.close()
