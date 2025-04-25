@@ -323,8 +323,20 @@ def tester():
         print("Failed to open database: ", e)
     return
 
-tester()
+def convertint_csv_to_parquet():
+    raw_path = os.path.abspath(__file__)
+    timezones_path = raw_path.split("project_loop")[0] + "project_loop/data/timezones.csv"
+    timezones_path_p = raw_path.split("project_loop")[0] + "project_loop/data/timezones.parquet"
+    ping_path = raw_path.split("project_loop")[0] + "project_loop/data/store_status.csv"
+    ping_path_p = raw_path.split("project_loop")[0] + "project_loop/data/store_status.parquet"
+    hours_path = raw_path.split("project_loop")[0] + "project_loop/data/menu_hours.csv"
+    hours_path_p = raw_path.split("project_loop")[0] + "project_loop/data/menu_hours.parquet"
+    pl.scan_csv(timezones_path).sink_parquet(timezones_path_p)
+    pl.scan_csv(ping_path).sink_parquet(ping_path_p)
+    pl.scan_csv(hours_path).sink_parquet(hours_path_p)
 
+
+convertint_csv_to_parquet()
 # def ingest_data(cursor: Cursor, conn: Connection):
 #     raw_path = os.path.abspath(__file__)
 #     # timezones_path = raw_path.split("project_loop")[0] + "project_loop/data/timezones.csv"

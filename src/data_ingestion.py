@@ -11,7 +11,6 @@ def defineTables(cursor: Cursor):
         store_id TEXT PRIMARY KEY NOT NULL,
         timezone TEXT NOT NULL
     )''')
-    print("created_timezones")
     cursor.execute('''CREATE TABLE IF NOT EXISTS store_pings (
         id  INTEGER PRIMARY KEY AUTOINCREMENT,
         store_id TEXT NOT NULL,
@@ -19,7 +18,6 @@ def defineTables(cursor: Cursor):
         recorded_at TEXT NOT NULL,
         FOREIGN KEY (store_id) REFERENCES store_timezones(store_id)
     )''')
-    print("created_pings")
     cursor.execute('''CREATE TABLE IF NOT EXISTS store_hours (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         store_id TEXT NOT NULL,
@@ -28,17 +26,17 @@ def defineTables(cursor: Cursor):
         end_time TEXT NOT NULL,
         FOREIGN KEY (store_id) REFERENCES store_timezones(store_id)
     )''')
-    print("created_hours")
     return
 
 def ingest_data():
+    print("starting data ingestion")
     raw_path = os.path.abspath(__file__)
-    timezones_path = raw_path.split("project_loop")[0] + "project_loop/data/timezones.csv"
-    ping_path = raw_path.split("project_loop")[0] + "project_loop/data/store_status.csv"
-    hours_path = raw_path.split("project_loop")[0] + "project_loop/data/menu_hours.csv"
-    df_timezones = pl.scan_csv(timezones_path).collect()
-    df_ping = pl.scan_csv(ping_path).collect()
-    df_hours = pl.scan_csv(hours_path).collect()
+    timezones_path = raw_path.split("project_loop")[0] + "project_loop/data/timezones.parquet"
+    ping_path = raw_path.split("project_loop")[0] + "project_loop/data/store_status.parquet"
+    hours_path = raw_path.split("project_loop")[0] + "project_loop/data/menu_hours.parquet"
+    df_timezones = pl.scan_parquet(timezones_path).collect()
+    df_ping = pl.scan_parquet(ping_path).collect()
+    df_hours = pl.scan_parquet(hours_path).collect()
     df_p = df_ping.select(
         pl.col('store_id').unique(maintain_order=True).alias("UstoreId"),
         pl.col('store_id').unique_counts().alias("count"),
@@ -89,20 +87,23 @@ def ingest_data():
         connection=f'sqlite:///{db_loc}',
         if_table_exists="append",
     )
+    print("data ingestion complete")
     return
 
-try:
-    conn = sqlite3.connect(db_loc)
-    cursor = conn.cursor()
 
-    # define and create Tables
-    defineTables(cursor)
+def data_ingestor():
+    try:
+        conn = sqlite3.connect(db_loc)
+        cursor = conn.cursor()
 
-    # Ingest data from csv files
-    ingest_data()
+        # define and create Tables
+        defineTables(cursor)
 
-    cursor.close()
-    conn.close()
+        # Ingest data from csv files
+        ingest_data()
 
-except sqlite3.OperationalError as e :
-    print("Failed to open database: ", e)
+        cursor.close()
+        conn.close()
+
+    except sqlite3.OperationalError as e :
+        print("Failed to open database: ", e)
