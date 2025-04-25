@@ -8,4 +8,17 @@ there is no data available it's fair to assume that there's been some issue with
 there, thus, the system is inactive, or, the system is down.
 
 3) How will the active pings will be injested ?
-a)
+a) Pings are polled in every single hour, so the ping injestion will go like this
+    - any ping, which is polled within 30 minutes would not be considered for anything
+    - only pings which polled active status be considered for calculation of final answer,
+      as it is considered that, if the systems which are responsible for polling, marks inactive
+      or doesn't mark anything, it simply shows that the system is inactive or not fully functional
+      thus making it appropriate to consider non-availability of pings as inactive
+    - only pings since 1 week before the current timestamp are used to calculate the report
+    - every ping, is responsible for makring a time of 1 hour as active, that is 30 minutes
+      before and 30 mins after the ping.
+    - all the basic dynamics are similar for a day ago stats
+    - For an hour ago, any ping lying in that hour, lead to declaring the whole hour
+      as active, while any ping in one and half hour and not in one hour leads to only that
+      much time active that can overlap with the last hour, that is, the forward hour window and
+      the original last hour overlap
