@@ -9,10 +9,12 @@ import threading
 previous_processing_datetime = None
 app = FastAPI()
 
+
 def datetimeDiff(after: datetime, before: datetime):
     time_diff = after - before
     hours = time_diff.total_seconds() // 3600
     return hours
+
 
 @app.get("/trigger_report")
 async def trigger_report():
@@ -32,6 +34,7 @@ async def trigger_report():
         threading.Thread(target=report_processor).start()
         processing_status["status"] = 1
     return {"status_id": uid}
+
 
 @app.get("/get_report")
 async def get_report(report_id: str = ""):

@@ -26,7 +26,8 @@ def polars_store_hour_converter(temp_res: pl.DataFrame):
         x[obj[2]] = [obj[3], obj[4]]
     return x
 
-def datetimeToDay(datetimeStr):
+
+def datetimeToDay(datetimeStr: str):
     if datetimeStr[-1] != 'C':
         datetimeStr += " UTC"
     weekday = datetime.strptime(
@@ -34,7 +35,7 @@ def datetimeToDay(datetimeStr):
     return weekday
 
 
-def utc_to_localtimestamp(timezone, datetimestr):
+def utc_to_localtimestamp(timezone: str, datetimestr: str):
     from_zone = tz.gettz('UTC')
     to_zone = tz.gettz(timezone)
     utc = datetime.strptime(
@@ -44,7 +45,7 @@ def utc_to_localtimestamp(timezone, datetimestr):
     return localtime_str
 
 
-def datetimeDiff(local, last):
+def datetimeDiff(local: str, last: str):
     format = "%Y-%m-%d %H:%M:%S.%f"
     local_obj = datetime.strptime(local, format)
     last_obj = datetime.strptime(last, format)
@@ -54,7 +55,7 @@ def datetimeDiff(local, last):
     return (hours, minutes)
 
 
-def timeDiff(open, close):
+def timeDiff(open: str, close: str):
     format = "%H:%M:%S"
     close_obj = datetime.strptime(close, format)
     open_obj = datetime.strptime(open, format)
@@ -64,7 +65,7 @@ def timeDiff(open, close):
     return (hours, minutes)
 
 
-def calc_uptime_downtime(week_u, day_u, hour_u, working_hours, store_id, timezone, weekday_day_ago):
+def calc_uptime_downtime(week_u: int, day_u: int, hour_u: int, working_hours: list[str], store_id: str, timezone: str, weekday_day_ago: int):
     week_work = [0.0, 0.0]
     day_work = [0.0, 0.0]
     hour_work = 0.0
@@ -139,7 +140,7 @@ def start_queries(conn: Connection, cursor: Cursor):
         "downtime_last_day": pl.Float32,
         "downtime_last_week": pl.Float32,
     }
-    
+
     # Date-time objects
     a_week_ago_obj = internal_curr_datetime_obj_utc - \
         timedelta(weeks=1)
@@ -153,7 +154,7 @@ def start_queries(conn: Connection, cursor: Cursor):
     an_hour_str = an_hour_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
     an_hour_and_half_str = an_hour_and_half_ago_obj.strftime(
         "%Y-%m-%d %H:%M:%S.%f UTC")
-    
+
     # Fetching total number of store_ids
     result_df = pl.DataFrame(schema=schema)
     total_store_id_query = 'SELECT COUNT(*) FROM store_timezones'
@@ -165,26 +166,30 @@ def start_queries(conn: Connection, cursor: Cursor):
     for page in range(total_pages):
         print(f'Processing page {page+1}')
         start_time_ = time.time()
-        
+
         # fetching all the store_ids, timezones, relavant pings and working hours
         store_id_time_zones_query = '''SELECT * FROM store_timezones
         ORDER BY store_id
         LIMIT ? OFFSET ?'''
-        timezone__df = pl.read_database(store_id_time_zones_query, connection=conn, execute_options={"parameters": [store_ids_per_page, page * store_ids_per_page]})
+        timezone__df = pl.read_database(store_id_time_zones_query, connection=conn, execute_options={
+                                        "parameters": [store_ids_per_page, page * store_ids_per_page]})
         page_store_ids = timezone__df["store_id"].to_list()
         a_week_ago_obj = internal_curr_datetime_obj_utc - timedelta(weeks=1)
-        a_week_str =  a_week_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
-        
-        store_id_placeholder = ",".join("?" for _ in range(timezone__df.height))
+        a_week_str = a_week_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
+
+        store_id_placeholder = ",".join(
+            "?" for _ in range(timezone__df.height))
         working_hour_query = f'''SELECT * FROM store_hours
         WHERE store_id in ({store_id_placeholder})
         ORDER BY store_id ASC'''
-        hours_df = pl.read_database(query=working_hour_query, connection=conn, execute_options={"parameters": page_store_ids})
+        hours_df = pl.read_database(query=working_hour_query, connection=conn, execute_options={
+                                    "parameters": page_store_ids})
         timestamp_since_week_ago_query = f'''SELECT store_id, recorded_at FROM store_pings
         WHERE store_id in ({store_id_placeholder}) AND recorded_at >= ? AND is_active = 1
         ORDER BY store_id ASC'''
         page_store_ids.append(a_week_str)
-        pings_df = pl.read_database(query=timestamp_since_week_ago_query, connection=conn, execute_options={"parameters": page_store_ids})
+        pings_df = pl.read_database(query=timestamp_since_week_ago_query,
+                                    connection=conn, execute_options={"parameters": page_store_ids})
         page_result_store = []
         # index_iterator = 0
         for row in timezone__df.iter_rows():
@@ -192,13 +197,14 @@ def start_queries(conn: Connection, cursor: Cursor):
             store_id = row[0]
             curr_zone = row[1]
             working_hours = hours_df.filter(
-                pl.col('store_id') ==  store_id
+                pl.col('store_id') == store_id
             ).sort("week_day")
             working_hours = polars_store_hour_converter(working_hours)
             timestamps_and_days = pings_df.filter(
-                pl.col('store_id') ==  store_id
+                pl.col('store_id') == store_id
             ).sort('recorded_at')
-            timestamps_and_days = [list(rows) for rows in timestamps_and_days.rows()]
+            timestamps_and_days = [list(rows)
+                                   for rows in timestamps_and_days.rows()]
             last_timestamp = None
             newday = True
             a_week_upticks = 0
@@ -266,7 +272,8 @@ def start_queries(conn: Connection, cursor: Cursor):
         result_df = result_df.vstack(temp_df)
     poor_time_end = time.time()
     result_df.write_csv(result_loc)
-    print(f'Processing completed, Total time taken : {poor_time_end - poor_time_start}')
+    print(
+        f'Processing completed, Total time taken : {poor_time_end - poor_time_start}')
 
 
 def report_processor():
