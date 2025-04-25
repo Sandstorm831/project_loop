@@ -54,13 +54,13 @@ Once you finish installation Node.js, follow the commands to setup the project l
    ```
 3. Install python packages
    ```sh
-   poetry install
+   poetry install --no-root
    ```
 
 4. Activate virtual env
 
    ```sh
-   poetry shell
+   eval $(poetry env activate) 
    ```
 
 5. Start the server
