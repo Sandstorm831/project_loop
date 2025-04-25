@@ -2,6 +2,7 @@ import sqlite3
 import os
 from sqlite3.dbapi2 import Connection, Cursor
 import math
+import polars as pl
 filePath = os.path.abspath(__file__)
 db_loc = filePath.split("project_loop")[0] + "project_loop/ingestor.db"
 
@@ -12,11 +13,30 @@ internal_curr_datetime = "2024-10-14 23:55:18.727055 UTC"
 internal_curr_datetime_obj_utc = datetime.strptime(internal_curr_datetime, "%Y-%m-%d %H:%M:%S.%f UTC").replace(tzinfo=tz.gettz('UTC'))
 
 def store_hour_converter(temp_res):
-    x = [() for i in range(7)]
+    x = [["00:01:00", "23:59:59"] for i in range(7)]
+    if len(temp_res) == 0:
+        return x
     for obj in temp_res:
-        x[obj[2]] = (obj[3], obj[4])
+        x[obj[2]] = [obj[3], obj[4]]
     return x
 
+def polars_store_hour_converter(temp_res: pl.DataFrame):
+    x = [["00:01:00", "23:59:59"] for i in range(7)]
+    if temp_res.height == 0:
+        return x
+    for obj in temp_res.rows():
+        x[obj[2]] = [obj[3], obj[4]]
+    return x
+
+TheBigSchema = {
+    "store_id": pl.String,
+    "utc_pings": pl.String, 
+    "timezone": pl.String,
+    "local_pings": pl.String,
+    "local_weekday": pl.Int8,
+    "opening_hour": pl.String,
+    "closing_hour": pl.String,
+}
 
 def datetimeToDay(datetimeStr):
     if datetimeStr[-1] != 'C':
@@ -122,16 +142,81 @@ def tester():
         cursor = conn.cursor()
 
         total_store_id_query = 'SELECT COUNT(*) FROM store_timezones'
-        store_ids_per_page = 200
+        store_ids_per_page = 1000
         cursor.execute(total_store_id_query)
         total_store_ids = cursor.fetchone()[0]
         total_pages = math.ceil(total_store_ids / store_ids_per_page)
+        
+        # getting all active (1) observations since 1 week before
+        a_week_ago_obj = internal_curr_datetime_obj_utc - timedelta(weeks=1)
+        a_day_ago_obj = internal_curr_datetime_obj_utc - timedelta(days=1)
+        an_hour_ago_obj = internal_curr_datetime_obj_utc - timedelta(hours=1)
+        an_hour_and_half_ago_obj = internal_curr_datetime_obj_utc - timedelta(hours=1, minutes=30)
+        a_week_str =  a_week_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
+        a_day_str = a_day_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
+        an_hour_str = an_hour_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
+        an_hour_and_half_str = an_hour_and_half_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
+        
         for page in range(total_pages):
-            store_id_time_zones_query = f'''SELECT * FROM store_timezones
+            # store_id_time_zones_query = f'''SELECT * FROM store_timezones
+            # ORDER BY store_id
+            # LIMIT {store_ids_per_page} OFFSET {page * store_ids_per_page}'''
+            # cursor.execute(store_id_time_zones_query)
+            # store_id_time_zones = cursor.fetchall()
+            # page_store_ids = [tup[0] for tup in store_id_time_zones]
+            # a_week_ago_obj = internal_curr_datetime_obj_utc - timedelta(weeks=1)
+            # a_week_str =  a_week_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
+            ################
+            store_id_time_zones_query = '''SELECT * FROM store_timezones
             ORDER BY store_id
-            LIMIT {store_ids_per_page} OFFSET {page * store_ids_per_page}'''
-            cursor.execute(store_id_time_zones_query)
-            store_id_time_zones = cursor.fetchall()
+            LIMIT ? OFFSET ?'''
+            timezone__df = pl.read_database(store_id_time_zones_query, connection=conn, execute_options={"parameters": [store_ids_per_page, page * store_ids_per_page]})
+            page_store_ids = timezone__df["store_id"].to_list()
+            a_week_ago_obj = internal_curr_datetime_obj_utc - timedelta(weeks=1)
+            a_week_str =  a_week_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
+            
+            store_id_placeholder = ",".join("?" for _ in range(timezone__df.height))
+            working_hour_query = f'''SELECT * FROM store_hours
+            WHERE store_id in ({store_id_placeholder})
+            ORDER BY store_id ASC'''
+            hours_df = pl.read_database(query=working_hour_query, connection=conn, execute_options={"parameters": page_store_ids})
+            timestamp_since_week_ago_query = f'''SELECT store_id, recorded_at FROM store_pings
+            WHERE store_id in ({store_id_placeholder}) AND recorded_at >= ? AND is_active = 1
+            ORDER BY store_id ASC'''
+            page_store_ids.append(a_week_str)
+            pings_df = pl.read_database(query=timestamp_since_week_ago_query, connection=conn, execute_options={"parameters": page_store_ids})
+            
+            
+            for row in timezone__df.iter_rows():
+                store_id = row[0]
+                curr_zone = row[1]
+                working_hours = hours_df.filter(
+                    pl.col('store_id') ==  store_id
+                ).sort("week_day")
+                working_hours = polars_store_hour_converter(working_hours)
+                break
+            # print(pings_df.rows)
+            # TheBigDF = pings_df.select(
+            #     pl.col('store_id'),
+            #     pl.col('recorded_at').alias('utc_pings'),
+            # )
+            # TheBigDF = TheBigDF.join(timezone__df, on="store_id", how="left")
+            # TheBigDF = TheBigDF.with_columns(
+            #     (pl.col('utc_pings') + "/" + pl.col('timezone')).alias('utc/timezone')
+            # )
+            # # print(TheBigDF)
+            # TheBigDF = TheBigDF.with_columns(
+            #     # (datetime.strptime(pl.col('utc_pings'),"%Y-%m-%d %H:%M:%S.%f UTC").replace(tzinfo=tz.gettz('UTC')).astimezone(tz.gettz(pl.col('timezone'))).strftime("%Y-%m-%d %H:%M:%S.%f")).alias('local_pings')
+            #     # pl.col('utc_pings').str.to_datetime("%Y-%m-%d %H:%M:%S.%f UTC").dt.convert_time_zone(time_zone=pl.col('timezone').str.split(by="UTC")).alias("local_pings")
+            #     # pl.col('utc/timezone').pipe(polars_Timezone_to_localtimestamp).alias("local_pings")
+            # )
+            # print(TheBigDF)
+            
+            
+            
+            ################
+            break
+            
             for store_id, curr_zone in store_id_time_zones:
                 working_hour_query = f'''SELECT * FROM store_hours
                 WHERE store_id = ?'''
@@ -139,15 +224,6 @@ def tester():
                 temp_res = cursor.fetchall()
                 working_hours = store_hour_converter(temp_res)
 
-                # getting all active (1) observations since 1 week before
-                a_week_ago_obj = internal_curr_datetime_obj_utc - timedelta(weeks=1)
-                a_day_ago_obj = internal_curr_datetime_obj_utc - timedelta(days=1)
-                an_hour_ago_obj = internal_curr_datetime_obj_utc - timedelta(hours=1)
-                an_hour_and_half_ago_obj = internal_curr_datetime_obj_utc - timedelta(hours=1, minutes=30)
-                a_week_str =  a_week_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
-                a_day_str = a_day_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
-                an_hour_str = an_hour_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
-                an_hour_and_half_str = an_hour_and_half_ago_obj.strftime("%Y-%m-%d %H:%M:%S.%f UTC")
                 timestamp_since_week_ago_query = f'''SELECT * FROM store_pings
                 WHERE store_id = ? AND recorded_at >= ? AND is_active = 1
                 '''
