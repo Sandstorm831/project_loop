@@ -16,6 +16,8 @@
     <li><a href="#built-with">Built with</a></li>
     <li><a href="#prerequisites">Prerequisites</a></li>
     <li><a href="#installation">Installation</a></li>
+    <li><a href="#algorithm-description">Algorithm Description</a></li>
+    <li><a href="#results-and-improvements">Results and Improvements</a></li>
     <li><a href="#license">License</a></li>
   </ol>
 
